@@ -331,7 +331,7 @@
     }
     .tile:active { transform: translateY(0); }
     .tile.is-out { opacity: 0.5; }
-    .tile-grid { flex-direction: column; padding: 10px; gap: 8px; }
+    .tile-grid { flex-direction: column; padding: 10px; gap: 8px; max-height: 200px; }
     .tile-grid.compact { padding: 8px; }
     .tile-grid.comfy { padding: 12px; }
     .tile-list {
