@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useCart } from './context/CartContext';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import SellScreen from './screens/SellScreen';
+import PaymentScreen from './screens/PaymentScreen';
+import ReceiptScreen from './screens/ReceiptScreen';
+import type { CompletedOrder } from './screens/ReceiptScreen';
 
 const SCREEN_TITLES: Record<string, string> = {
   sell:      'Sell',
@@ -12,13 +16,34 @@ const SCREEN_TITLES: Record<string, string> = {
 };
 
 export default function App() {
-  const [screen, setScreen] = useState('sell');
-  const [isDark, setIsDark] = useState(false);
-  const [aiOn, setAiOn] = useState(true);
+  const { lines, clearCart, subtotal, tax, total } = useCart();
+
+  const [screen,         setScreen]         = useState('sell');
+  const [isDark,         setIsDark]         = useState(false);
+  const [aiOn,           setAiOn]           = useState(true);
+  const [paymentOpen,    setPaymentOpen]    = useState(false);
+  const [showReceipt,    setShowReceipt]    = useState(false);
+  const [completedOrder, setCompletedOrder] = useState<CompletedOrder | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
   }, [isDark]);
+
+  function handlePaymentComplete(method: string, tip: number) {
+    setCompletedOrder({
+      method,
+      tip,
+      subtotal,
+      tax,
+      total,
+      lines: [...lines],
+      orderNumber: 'T-2843',
+      completedAt: Date.now(),
+    });
+    clearCart();
+    setPaymentOpen(false);
+    setShowReceipt(true);
+  }
 
   return (
     <div className="app">
@@ -34,7 +59,7 @@ export default function App() {
         <Topbar title={SCREEN_TITLES[screen]} />
         {screen === 'sell' ? (
           <div className="screen">
-            <SellScreen />
+            <SellScreen onCharge={() => setPaymentOpen(true)} aiOn={aiOn} />
           </div>
         ) : (
           <div className="screen screen-pad">
@@ -44,6 +69,26 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {paymentOpen && (
+        <PaymentScreen
+          subtotal={subtotal}
+          tax={tax}
+          total={total}
+          onCancel={() => setPaymentOpen(false)}
+          onComplete={handlePaymentComplete}
+        />
+      )}
+
+      {showReceipt && completedOrder && (
+        <ReceiptScreen
+          order={completedOrder}
+          onNewSale={() => {
+            setShowReceipt(false);
+            setCompletedOrder(null);
+          }}
+        />
+      )}
     </div>
   );
 }

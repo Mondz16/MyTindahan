@@ -3,6 +3,7 @@ import { products, categories } from '../lib/mockData.js';
 import type { Product } from '../lib/mockData.js';
 import { useCart } from '../context/CartContext.js';
 import type { CartLine } from '../context/CartContext.js';
+import { getUpsellSuggestion } from '../lib/upsell.js';
 
 // ─── icons ───────────────────────────────────────────────────────────────────
 
@@ -67,17 +68,126 @@ function IconMinus() {
   );
 }
 
+// ─── ConfigurePopover ─────────────────────────────────────────────────────────
+
+function ConfigurePopover({
+  product,
+  onAdd,
+  onClose,
+}: {
+  product: Product;
+  onAdd: (opts: { variant?: string; modifiers: string[] }) => void;
+  onClose: () => void;
+}) {
+  const [selectedVariant,  setSelectedVariant]  = useState<string | undefined>(product.variants?.[0]);
+  const [selectedMods,     setSelectedMods]     = useState<Set<string>>(new Set());
+
+  function toggleMod(mod: string) {
+    setSelectedMods(prev => {
+      const next = new Set(prev);
+      if (next.has(mod)) {
+        next.delete(mod);
+      } else {
+        next.add(mod);
+      }
+      return next;
+    });
+  }
+
+  function handleAdd() {
+    onAdd({ variant: selectedVariant, modifiers: [...selectedMods] });
+  }
+
+  return (
+    <div className="popover-backdrop" onClick={onClose}>
+      <div className="popover" onClick={e => e.stopPropagation()}>
+
+        {/* header */}
+        <div className="popover-hd">
+          <div>
+            <div className="popover-title">{product.name}</div>
+            <div className="popover-sub">${product.price.toFixed(2)}</div>
+          </div>
+          <div
+            style={{
+              width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+              background: product.swatch,
+              boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.08)',
+            }}
+          />
+        </div>
+
+        {/* variants */}
+        {product.variants && product.variants.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="popover-sect">Variant</div>
+            <div className="popover-grid">
+              {product.variants.map(v => (
+                <button
+                  key={v}
+                  className={`variant-pill${selectedVariant === v ? ' is-on' : ''}`}
+                  onClick={() => setSelectedVariant(v)}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* modifiers */}
+        {product.modifiers && product.modifiers.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="popover-sect">Add-ons</div>
+            <div className="popover-list">
+              {product.modifiers.map(mod => (
+                <label key={mod} className="mod-row">
+                  <input
+                    type="checkbox"
+                    checked={selectedMods.has(mod)}
+                    onChange={() => toggleMod(mod)}
+                  />
+                  {mod}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* actions */}
+        <div className="popover-actions" style={{ gap: 8 }}>
+          <button className="ghost-btn" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" onClick={handleAdd}>Add to cart</button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 // ─── ProductTile ──────────────────────────────────────────────────────────────
 
-function ProductTile({ product, view, onAdd }: { product: Product; view: 'grid' | 'list'; onAdd: () => void }) {
-  const lowStock  = product.stock > 0 && product.stock <= 5;
-  const outStock  = product.stock === 0;
+function ProductTile({
+  product,
+  view,
+  onAdd,
+  onConfigure,
+}: {
+  product: Product;
+  view: 'grid' | 'list';
+  onAdd: () => void;
+  onConfigure: () => void;
+}) {
+  const lowStock = product.stock > 0 && product.stock <= 5;
+  const outStock = product.stock === 0;
+  const needsPop = !!(product.variants?.length || product.modifiers?.length);
+  const handleClick = needsPop ? onConfigure : onAdd;
 
   if (view === 'list') {
     return (
       <button
         className={`tile tile-list${outStock ? ' is-out' : ''}`}
-        onClick={onAdd}
+        onClick={handleClick}
         disabled={outStock}
       >
         {lowStock && <div className="badge-warn" />}
@@ -93,7 +203,7 @@ function ProductTile({ product, view, onAdd }: { product: Product; view: 'grid' 
   return (
     <button
       className={`tile tile-grid${outStock ? ' is-out' : ''}`}
-      onClick={onAdd}
+      onClick={handleClick}
       disabled={outStock}
     >
       {lowStock && <div className="badge-warn" />}
@@ -139,13 +249,35 @@ function CartLineRow({
   );
 }
 
+// ─── AriaStrip ───────────────────────────────────────────────────────────────
+
+function AriaStrip({ suggestion, onAdd }: { suggestion: Product; onAdd: () => void }) {
+  return (
+    <div className="aria-strip">
+      <div className="aria-mark">
+        <span className="aria-dot" style={{ background: 'var(--accent-fg)' }} />
+      </div>
+      <div className="aria-text">
+        Try adding <strong>{suggestion.name}</strong> for ${suggestion.price.toFixed(2)}
+      </div>
+      <button className="aria-action" onClick={onAdd}>Add</button>
+    </div>
+  );
+}
+
 // ─── SellScreen ──────────────────────────────────────────────────────────────
 
-export default function SellScreen() {
+export default function SellScreen({ onCharge, aiOn }: { onCharge: () => void; aiOn: boolean }) {
   const { lines, addLine, incrementLine, decrementLine, removeLine, subtotal, tax, total, itemCount } = useCart();
   const [searchQuery,      setSearchQuery]      = useState('');
   const [activeCategoryId, setActiveCategoryId] = useState('all');
   const [view,             setView]             = useState<'grid' | 'list'>('grid');
+  const [pop,              setPop]              = useState<Product | null>(null);
+
+  const suggestion = useMemo(
+    () => (lines.length > 0 ? getUpsellSuggestion(lines, products) : null),
+    [lines],
+  );
 
   const filteredProducts = useMemo(() => {
     const q = searchQuery.toLowerCase();
@@ -156,8 +288,24 @@ export default function SellScreen() {
     });
   }, [searchQuery, activeCategoryId]);
 
+  function handlePopoverAdd(opts: { variant?: string; modifiers: string[] }) {
+    if (!pop) return;
+    addLine(pop, opts);
+    setPop(null);
+  }
+
   return (
     <div className="sell">
+
+      {/* ── variant/modifier popover ──────────────────────────────────────── */}
+      {pop && (
+        <ConfigurePopover
+          key={pop.id}
+          product={pop}
+          onAdd={handlePopoverAdd}
+          onClose={() => setPop(null)}
+        />
+      )}
 
       {/* ── LEFT ──────────────────────────────────────────────────────────── */}
       <div className="sell-left">
@@ -208,6 +356,7 @@ export default function SellScreen() {
               product={product}
               view={view}
               onAdd={() => addLine(product)}
+              onConfigure={() => setPop(product)}
             />
           ))}
         </div>
@@ -252,6 +401,10 @@ export default function SellScreen() {
           ))}
         </div>
 
+        {aiOn && itemCount > 0 && suggestion && (
+          <AriaStrip suggestion={suggestion} onAdd={() => addLine(suggestion)} />
+        )}
+
         <div className="totals">
           <div className="tot-row">
             <span>Subtotal</span>
@@ -267,7 +420,7 @@ export default function SellScreen() {
           </div>
         </div>
 
-        <button className="primary-btn" disabled={itemCount === 0}>
+        <button className="primary-btn" disabled={itemCount === 0} onClick={onCharge}>
           Charge <span className="mono">${total.toFixed(2)}</span>
         </button>
 
